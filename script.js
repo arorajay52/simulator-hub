@@ -201,6 +201,7 @@ class PhysicsEngine {
         this.timeElapsed = 0;
         
         const rng = new SeededRNG(seed);
+        this.rng = rng; // Save rng on engine for deterministic updates!
         this.rings = [];
         
         // Distribute ring radii evenly
@@ -300,47 +301,48 @@ class PhysicsEngine {
                     }
 
                     if (!inGap) {
-                        // COLLISION! Solid ring bounce
                         const normalX = dx / (dist || 1);
                         const normalY = dy / (dist || 1);
-
-                        // Find if ball is colliding from inner or outer boundary
                         const isInsideRing = dist < ring.radius;
 
-                        if (isInsideRing) {
-                            // Pushed back inward
-                            this.ball.x = this.centerX + normalX * (innerBound - this.ball.radius - 0.5);
-                            this.ball.y = this.centerY + normalY * (innerBound - this.ball.radius - 0.5);
-                        } else {
-                            // Pushed back outward
-                            this.ball.x = this.centerX + normalX * (outerBound + this.ball.radius + 0.5);
-                            this.ball.y = this.centerY + normalY * (outerBound + this.ball.radius + 0.5);
+                        // Check relative velocity towards the barrier to prevent double bounce/stickiness
+                        const vr = this.ball.vx * normalX + this.ball.vy * normalY;
+                        if ((isInsideRing && vr > 0) || (!isInsideRing && vr < 0)) {
+                            if (isInsideRing) {
+                                // Pushed back inward
+                                this.ball.x = this.centerX + normalX * (innerBound - this.ball.radius - 0.5);
+                                this.ball.y = this.centerY + normalY * (innerBound - this.ball.radius - 0.5);
+                            } else {
+                                // Pushed back outward
+                                this.ball.x = this.centerX + normalX * (outerBound + this.ball.radius + 0.5);
+                                this.ball.y = this.centerY + normalY * (outerBound + this.ball.radius + 0.5);
+                            }
+
+                            // Constant-speed rebound physics: rebound normal direction
+                            const bounceNormalX = isInsideRing ? -normalX : normalX;
+                            const bounceNormalY = isInsideRing ? -normalY : normalY;
+                            
+                            const bounceNormalAngle = Math.atan2(bounceNormalY, bounceNormalX);
+                            
+                            // Deterministic bounce angle using this.rng
+                            const spreadAngle = (this.rng.next() - 0.5) * (Math.PI / 3);
+                            const reboundAngle = bounceNormalAngle + spreadAngle;
+
+                            // Bouncier increment
+                            if (this.bouncierEnabled) {
+                                this.ball.targetSpeed = Math.min(this.ball.targetSpeed + this.bounceIncrement, this.ball.baseTargetSpeed * 2.2);
+                            }
+
+                            // Apply velocity rebound
+                            this.ball.vx = Math.cos(reboundAngle) * this.ball.targetSpeed;
+                            this.ball.vy = Math.sin(reboundAngle) * this.ball.targetSpeed;
+
+                            // Trigger bounce event
+                            if (this.onCollision) {
+                                this.onCollision(i, this.ball.x, this.ball.y);
+                            }
+                            break; // Only collide with one ring per sub-step
                         }
-
-                        // Constant-speed rebound physics: rebound normal direction
-                        const bounceNormalX = isInsideRing ? -normalX : normalX;
-                        const bounceNormalY = isInsideRing ? -normalY : normalY;
-                        
-                        const bounceNormalAngle = Math.atan2(bounceNormalY, bounceNormalX);
-                        
-                        // Apply a random bounce sweep of +/- 30 degrees (Math.PI / 6)
-                        const spreadAngle = (Math.random() - 0.5) * (Math.PI / 3);
-                        const reboundAngle = bounceNormalAngle + spreadAngle;
-
-                        // Bouncier increment
-                        if (this.bouncierEnabled) {
-                            this.ball.targetSpeed = Math.min(this.ball.targetSpeed + this.bounceIncrement, this.ball.baseTargetSpeed * 2.2);
-                        }
-
-                        // Apply velocity rebound
-                        this.ball.vx = Math.cos(reboundAngle) * this.ball.targetSpeed;
-                        this.ball.vy = Math.sin(reboundAngle) * this.ball.targetSpeed;
-
-                        // Trigger bounce event
-                        if (this.onCollision) {
-                            this.onCollision(i, this.ball.x, this.ball.y);
-                        }
-                        break; // Only collide with one ring per sub-step
                     } else {
                         // Pass through gap! Reset speed multiplier build-up
                         if (this.bouncierEnabled) {
@@ -356,14 +358,11 @@ class PhysicsEngine {
     testSeed(seed, maxSeconds = 120) {
         this.init(seed);
         
-        const rng = new SeededRNG(seed);
-        
         const dt = 1 / 60;
         const maxSteps = maxSeconds * 60;
         let step = 0;
 
         while (!this.isEscaped && step < maxSteps) {
-            // Headless fast update (no random in updates, pure seed calculation)
             const substeps = 12;
             const subDt = dt / substeps;
 
@@ -422,29 +421,33 @@ class PhysicsEngine {
                             const normalY = dy / (dist || 1);
                             const isInsideRing = dist < ring.radius;
 
-                            if (isInsideRing) {
-                                this.ball.x = this.centerX + normalX * (innerBound - this.ball.radius - 0.5);
-                                this.ball.y = this.centerY + normalY * (innerBound - this.ball.radius - 0.5);
-                            } else {
-                                this.ball.x = this.centerX + normalX * (outerBound + this.ball.radius + 0.5);
-                                this.ball.y = this.centerY + normalY * (outerBound + this.ball.radius + 0.5);
+                            // Check relative velocity towards the barrier
+                            const vr = this.ball.vx * normalX + this.ball.vy * normalY;
+                            if ((isInsideRing && vr > 0) || (!isInsideRing && vr < 0)) {
+                                if (isInsideRing) {
+                                    this.ball.x = this.centerX + normalX * (innerBound - this.ball.radius - 0.5);
+                                    this.ball.y = this.centerY + normalY * (innerBound - this.ball.radius - 0.5);
+                                } else {
+                                    this.ball.x = this.centerX + normalX * (outerBound + this.ball.radius + 0.5);
+                                    this.ball.y = this.centerY + normalY * (outerBound + this.ball.radius + 0.5);
+                                }
+
+                                const bounceNormalX = isInsideRing ? -normalX : normalX;
+                                const bounceNormalY = isInsideRing ? -normalY : normalY;
+                                const bounceNormalAngle = Math.atan2(bounceNormalY, bounceNormalX);
+
+                                // Deterministic bounce angle using this.rng
+                                const spreadAngle = (this.rng.next() - 0.5) * (Math.PI / 3);
+                                const reboundAngle = bounceNormalAngle + spreadAngle;
+
+                                if (this.bouncierEnabled) {
+                                    this.ball.targetSpeed = Math.min(this.ball.targetSpeed + this.bounceIncrement, this.ball.baseTargetSpeed * 2.2);
+                                }
+
+                                this.ball.vx = Math.cos(reboundAngle) * this.ball.targetSpeed;
+                                this.ball.vy = Math.sin(reboundAngle) * this.ball.targetSpeed;
+                                break;
                             }
-
-                            const bounceNormalX = isInsideRing ? -normalX : normalX;
-                            const bounceNormalY = isInsideRing ? -normalY : normalY;
-                            const bounceNormalAngle = Math.atan2(bounceNormalY, bounceNormalX);
-
-                            // LCG RNG based bounce spread for solver consistency
-                            const spreadAngle = (rng.next() - 0.5) * (Math.PI / 3);
-                            const reboundAngle = bounceNormalAngle + spreadAngle;
-
-                            if (this.bouncierEnabled) {
-                                this.ball.targetSpeed = Math.min(this.ball.targetSpeed + this.bounceIncrement, this.ball.baseTargetSpeed * 2.2);
-                            }
-
-                            this.ball.vx = Math.cos(reboundAngle) * this.ball.targetSpeed;
-                            this.ball.vy = Math.sin(reboundAngle) * this.ball.targetSpeed;
-                            break;
                         } else {
                             if (this.bouncierEnabled) {
                                 this.ball.targetSpeed = Math.max(this.ball.targetSpeed - this.bounceIncrement * 2, this.ball.baseTargetSpeed);
@@ -491,6 +494,7 @@ class SimulationApp {
         this.ctx = this.canvas.getContext('2d');
         
         this.physics = new PhysicsEngine(this.canvas.width, this.canvas.height);
+        this.solverPhysics = new PhysicsEngine(this.canvas.width, this.canvas.height); // Dedicated CPU solver to prevent render corruption
         this.sparks = [];
         
         this.isPlaying = true;
@@ -523,6 +527,17 @@ class SimulationApp {
         
         // Start frame loop
         requestAnimationFrame(this.tick.bind(this));
+    }
+
+    syncSolverParams() {
+        this.solverPhysics.gravity = this.physics.gravity;
+        this.solverPhysics.targetSpeed = this.physics.targetSpeed;
+        this.solverPhysics.ringCount = this.physics.ringCount;
+        this.solverPhysics.gapSizeDeg = this.physics.gapSizeDeg;
+        this.solverPhysics.rotationSpeedMult = this.physics.rotationSpeedMult;
+        this.solverPhysics.ballRadius = this.physics.ballRadius;
+        this.solverPhysics.bouncierEnabled = this.physics.bouncierEnabled;
+        this.solverPhysics.bounceIncrement = this.physics.bounceIncrement;
     }
 
     initEvents() {
@@ -722,6 +737,9 @@ class SimulationApp {
         const batchSearch = () => {
             if (!this.searchActive) return;
 
+            // Sync settings to the headless solver
+            this.syncSolverParams();
+
             const batchSize = 120; // test 120 seeds per frame
             for (let i = 0; i < batchSize; i++) {
                 testedSeedsCount++;
@@ -730,7 +748,7 @@ class SimulationApp {
                 const testSeed = Math.floor(Math.random() * 9999999);
                 
                 // Simulate running and get escape duration
-                const escapeDuration = this.physics.testSeed(testSeed, targetDuration + 10);
+                const escapeDuration = this.solverPhysics.testSeed(testSeed, targetDuration + 10);
                 const diff = Math.abs(escapeDuration - targetDuration);
 
                 if (diff < closestDifference) {
@@ -739,7 +757,7 @@ class SimulationApp {
                     closestDuration = escapeDuration;
                 }
 
-                // Perfect match check (within +/- 0.5s tolerance)
+                // Perfect match check (within +/- 0.35s tolerance)
                 if (diff <= 0.35) {
                     statusDisplay.innerHTML = `<span style="color:var(--accent)">FOUND PERFECT SEED: ${testSeed}</span><br>Escaped in ${escapeDuration.toFixed(2)}s!`;
                     this.resetSimulation(testSeed);
