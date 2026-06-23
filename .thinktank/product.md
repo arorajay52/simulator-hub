@@ -12,11 +12,11 @@
 - **Video Capture**: MediaRecorder API with canvas stream capturing both graphic framebuffers and audio outputs.
 
 ## Core Features
-1. **Dynamic Concentric Rings**: Seeded rings with custom radii, gap segments, and speeds rotating in alternating directions.
+1. **Extensible Workspace Engine**: Modular workspace structure (defaulting to Concentric Rings) allowing interchangeable physics scenarios and rendering configurations.
 2. **Sub-Stepped Physics Solver**: 12 steps per frame physics loop mapping constant-speed bounce trajectories.
-3. **Simulation Seed Finder**: A client-side headless solver running ~120 simulations per frame to identify matching escape-time seeds.
-4. **Custom HD Recorder**: Direct WebM video download capturing rendering ticks and synth chimes.
-5. **Responsive Viewport**: Automatic alignment, drawer controls sheet for mobile devices, and selectable aspect ratios (9:16 vertical for TikTok, 1:1, 16:9).
+3. **Simulation Seed Finder**: A client-side headless solver running ~120 simulations per frame to identify matching escape-time seeds. Automatically loads and plays matching seeds instantly.
+4. **Custom HD Recorder**: Immediate WebM video recording toggled manually, saving visual ticks and synth plucks directly.
+5. **Interactive Controls & Viewport**: Keyboard shortcuts support, "🎲 Random" seed generator, responsive panel drawer, and selectable aspect ratios (9:16 vertical for TikTok, 1:1, 16:9).
 
 ## Key Files
 - `index.html` — Layout structures, settings tabs, and header.

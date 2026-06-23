@@ -166,7 +166,8 @@ class Ball {
     }
 }
 
-class PhysicsEngine {
+// --- Extensible Engine Workspace Architecture ---
+class BaseWorkspace {
     constructor(width, height) {
         this.width = width;
         this.height = height;
@@ -174,10 +175,32 @@ class PhysicsEngine {
         this.centerY = height / 2;
         
         this.seed = 1337;
+        this.isEscaped = false;
+        this.timeElapsed = 0;
+        
+        // Callbacks
+        this.onCollision = null;
+        this.onEscape = null;
+    }
+
+    init(seed) {
+        this.seed = seed;
+        this.isEscaped = false;
+        this.timeElapsed = 0;
+    }
+
+    update(dt) {}
+    render(ctx, options) {}
+    testSeed(seed, maxSeconds) {}
+}
+
+class ConcentricRingsWorkspace extends BaseWorkspace {
+    constructor(width, height) {
+        super(width, height);
         this.rings = [];
         this.ball = null;
         
-        // User settings
+        // Settings/Params
         this.gravity = 10;
         this.targetSpeed = 400;
         this.ringCount = 5;
@@ -185,20 +208,11 @@ class PhysicsEngine {
         this.rotationSpeedMult = 1.5;
         this.ballRadius = 12;
         this.bouncierEnabled = true;
-        this.bounceIncrement = 12; // speed increase per hit
-        
-        this.isEscaped = false;
-        this.timeElapsed = 0;
-        
-        // Collision callbacks
-        this.onCollision = null;
-        this.onEscape = null;
+        this.bounceIncrement = 12;
     }
 
     init(seed = Math.floor(Math.random() * 99999999)) {
-        this.seed = seed;
-        this.isEscaped = false;
-        this.timeElapsed = 0;
+        super.init(seed);
         
         const rng = new SeededRNG(seed);
         this.rng = rng; // Save rng on engine for deterministic updates!
@@ -354,6 +368,71 @@ class PhysicsEngine {
         }
     }
 
+    render(ctx, options) {
+        const { showNeon } = options;
+
+        // Draw concentric guide circles
+        ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+        ctx.lineWidth = 1;
+        for (let r = 50; r < 500; r += 50) {
+            ctx.beginPath();
+            ctx.arc(this.centerX, this.centerY, r, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // Draw ball trail
+        if (this.ball && this.ball.trail.length > 1) {
+            for (let i = 1; i < this.ball.trail.length; i++) {
+                const p1 = this.ball.trail[i - 1];
+                const p2 = this.ball.trail[i];
+                const pct = i / this.ball.trail.length;
+                
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                
+                ctx.strokeStyle = `rgba(0, 255, 204, ${pct * 0.4})`;
+                ctx.lineWidth = this.ball.radius * 2 * pct;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+            }
+        }
+
+        // Draw rings
+        this.rings.forEach(ring => {
+            const gap = ring.getGapAngles();
+            
+            ctx.save();
+            ctx.shadowBlur = showNeon ? 18 : 0;
+            ctx.shadowColor = ring.color;
+            ctx.strokeStyle = ring.color;
+            ctx.lineWidth = ring.thickness;
+            ctx.lineCap = 'round';
+            
+            ctx.beginPath();
+            ctx.arc(this.centerX, this.centerY, ring.radius, gap.end, gap.start);
+            ctx.stroke();
+            ctx.restore();
+        });
+
+        // Draw ball
+        if (this.ball) {
+            ctx.save();
+            ctx.shadowBlur = showNeon ? 25 : 0;
+            ctx.shadowColor = '#00ffcc';
+            
+            ctx.beginPath();
+            ctx.arc(this.ball.x, this.ball.y, this.ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+
+            ctx.strokeStyle = '#00ffcc';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
     // Headless simulator solver to test a seed in milliseconds
     testSeed(seed, maxSeconds = 120) {
         this.init(seed);
@@ -493,11 +572,14 @@ class SimulationApp {
         this.canvas = document.getElementById('physicsCanvas');
         this.ctx = this.canvas.getContext('2d');
         
-        this.physics = new PhysicsEngine(this.canvas.width, this.canvas.height);
-        this.solverPhysics = new PhysicsEngine(this.canvas.width, this.canvas.height); // Dedicated CPU solver to prevent render corruption
+        // Initialize default workspace (ConcentricRingsWorkspace)
+        this.physics = new ConcentricRingsWorkspace(this.canvas.width, this.canvas.height);
+        this.solverPhysics = new ConcentricRingsWorkspace(this.canvas.width, this.canvas.height);
+        
         this.sparks = [];
         
-        this.isPlaying = true;
+        // Start paused (do not start abruptly)
+        this.isPlaying = false;
         this.lastTime = 0;
         
         // Visual configs
@@ -507,7 +589,7 @@ class SimulationApp {
         this.screenShake = 0;
         this.shakeAmount = 0;
         
-        // Seed find variables
+        // Finder search variables
         this.searchActive = false;
         this.searchRequestId = null;
         
@@ -517,13 +599,15 @@ class SimulationApp {
         // Video Recorder variables
         this.mediaRecorder = null;
         this.recordedChunks = [];
-        this.isRecordingNext = false;
         this.isRecordingNow = false;
         this.recordStartTime = 0;
         this.recordTimerInterval = null;
 
         this.initEvents();
-        this.resetSimulation();
+        
+        // Seed default setup
+        const defaultSeed = Math.floor(Math.random() * 999999);
+        this.resetSimulation(defaultSeed);
         
         // Start frame loop
         requestAnimationFrame(this.tick.bind(this));
@@ -563,17 +647,17 @@ class SimulationApp {
 
         syncValue(document.getElementById('input-rings'), document.getElementById('val-rings'), (val) => {
             this.physics.ringCount = parseInt(val);
-            this.resetSimulation();
+            this.resetSimulation(this.physics.seed);
         });
 
         syncValue(document.getElementById('input-gap'), document.getElementById('val-gap'), (val) => {
             this.physics.gapSizeDeg = parseInt(val);
-            this.resetSimulation();
+            this.resetSimulation(this.physics.seed);
         });
 
         syncValue(document.getElementById('input-rotation'), document.getElementById('val-rotation'), (val) => {
             this.physics.rotationSpeedMult = parseFloat(val);
-            this.resetSimulation();
+            this.resetSimulation(this.physics.seed);
         });
 
         syncValue(document.getElementById('input-radius'), document.getElementById('val-radius'), (val) => {
@@ -603,6 +687,19 @@ class SimulationApp {
         bindToggle('toggle-particles', (active) => { this.showParticles = active; });
         bindToggle('toggle-screenShake', (active) => { this.screenShake = active ? 0 : -1; });
 
+        // Workspace Mode Selector
+        const modeSelect = document.getElementById('select-workspace-mode');
+        if (modeSelect) {
+            modeSelect.addEventListener('change', (e) => {
+                const mode = e.target.value;
+                if (mode === 'concentric-rings') {
+                    this.physics = new ConcentricRingsWorkspace(this.canvas.width, this.canvas.height);
+                    this.solverPhysics = new ConcentricRingsWorkspace(this.canvas.width, this.canvas.height);
+                    this.resetSimulation(this.physics.seed);
+                }
+            });
+        }
+
         // Tabs Switch
         const tabButtons = document.querySelectorAll('.tab-btn');
         const tabContents = document.querySelectorAll('.tab-content');
@@ -619,13 +716,20 @@ class SimulationApp {
         // HUD Play/Pause
         const playPauseBtn = document.getElementById('hudPlayPauseBtn');
         playPauseBtn.addEventListener('click', () => {
-            this.isPlaying = !this.isPlaying;
-            playPauseBtn.textContent = this.isPlaying ? '⏸ Pause' : '▶ Play';
+            this.togglePlayPause();
         });
 
-        // HUD Reset
+        // HUD Restart Current Seed
         document.getElementById('hudRestartBtn').addEventListener('click', () => {
-            this.resetSimulation();
+            this.resetSimulation(this.physics.seed);
+        });
+
+        // HUD Generate Random Seed
+        document.getElementById('hudNewSeedBtn').addEventListener('click', () => {
+            const randomSeed = Math.floor(Math.random() * 999999);
+            this.resetSimulation(randomSeed);
+            this.isPlaying = true;
+            document.getElementById('hudPlayPauseBtn').textContent = '⏸ Pause';
         });
 
         // Audio prompt
@@ -650,13 +754,13 @@ class SimulationApp {
                 // Recalculate frame aspect ratios
                 if (this.aspectRatio === '1:1') {
                     canvasFrame.style.aspectRatio = '1';
-                    canvasFrame.style.width = 'min(70vh, 85vw)';
+                    canvasFrame.style.width = 'min(78vh, 90vw)';
                 } else if (this.aspectRatio === '16:9') {
                     canvasFrame.style.aspectRatio = '1.777777778';
-                    canvasFrame.style.width = 'min(50vh * 1.7778, 85vw)';
+                    canvasFrame.style.width = 'min(55vh * 1.7778, 90vw)';
                 } else if (this.aspectRatio === '9:16') {
                     canvasFrame.style.aspectRatio = '0.5625';
-                    canvasFrame.style.width = 'min(75vh * 0.5625, 85vw)';
+                    canvasFrame.style.width = 'min(82vh * 0.5625, 90vw)';
                 }
             });
         });
@@ -664,28 +768,75 @@ class SimulationApp {
         // Video Record trigger
         const recordBtn = document.getElementById('btn-record');
         recordBtn.addEventListener('click', () => {
-            audio.init(); // ensure audio is running
-            this.isRecordingNext = true;
-            recordBtn.textContent = 'Recording scheduled...';
-            recordBtn.classList.add('btn-primary');
-            this.resetSimulation();
+            audio.init(); // ensure audio context is active
+            if (this.isRecordingNow) {
+                // Clicked while recording, so stop and download immediately
+                this.stopRecording();
+            } else {
+                // Clicked to record current seed
+                this.resetSimulation(this.physics.seed);
+                this.isPlaying = true;
+                document.getElementById('hudPlayPauseBtn').textContent = '⏸ Pause';
+                this.startRecording();
+            }
+        });
+
+        // Global Keyboard Shortcuts Event Handler
+        window.addEventListener('keydown', (e) => {
+            // Ignore key presses if user is focused inside input elements
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+
+            if (e.code === 'Space') {
+                e.preventDefault();
+                this.togglePlayPause();
+            } else if (e.code === 'KeyR') {
+                e.preventDefault();
+                this.resetSimulation(this.physics.seed);
+            } else if (e.code === 'ArrowUp') {
+                e.preventDefault();
+                const input = document.getElementById('input-speed');
+                const val = Math.min(parseInt(input.value) + 20, parseInt(input.max));
+                input.value = val;
+                document.getElementById('val-speed').textContent = val;
+                this.physics.targetSpeed = val;
+                this.solverPhysics.targetSpeed = val;
+                if (this.physics.ball) this.physics.ball.baseTargetSpeed = val;
+                if (this.solverPhysics.ball) this.solverPhysics.ball.baseTargetSpeed = val;
+            } else if (e.code === 'ArrowDown') {
+                e.preventDefault();
+                const input = document.getElementById('input-speed');
+                const val = Math.max(parseInt(input.value) - 20, parseInt(input.min));
+                input.value = val;
+                document.getElementById('val-speed').textContent = val;
+                this.physics.targetSpeed = val;
+                this.solverPhysics.targetSpeed = val;
+                if (this.physics.ball) this.physics.ball.baseTargetSpeed = val;
+                if (this.solverPhysics.ball) this.solverPhysics.ball.baseTargetSpeed = val;
+            } else if (e.code === 'KeyS') {
+                e.preventDefault();
+                if (this.searchActive) {
+                    this.cancelSeedSearch();
+                } else {
+                    this.startSeedSearch();
+                }
+            }
         });
     }
 
-    resetSimulation(seed = Math.floor(Math.random() * 999999)) {
+    togglePlayPause() {
+        this.isPlaying = !this.isPlaying;
+        document.getElementById('hudPlayPauseBtn').textContent = this.isPlaying ? '⏸ Pause' : '▶ Play';
+    }
+
+    resetSimulation(seed = this.physics.seed) {
         this.physics.init(seed);
         this.sparks = [];
         this.physics.onCollision = (ringIdx, x, y) => this.handleCollision(ringIdx, x, y);
         this.physics.onEscape = () => this.handleEscape();
         
         document.getElementById('hudSeedDisplay').textContent = `Seed: ${seed}`;
+        document.getElementById('hudPlayPauseBtn').textContent = this.isPlaying ? '⏸ Pause' : '▶ Play';
         this.lastTime = performance.now();
-        
-        // If recording was scheduled, trigger it immediately on reload
-        if (this.isRecordingNext) {
-            this.isRecordingNext = false;
-            this.startRecording();
-        }
     }
 
     handleCollision(ringIndex, x, y) {
@@ -761,6 +912,8 @@ class SimulationApp {
                 if (diff <= 0.35) {
                     statusDisplay.innerHTML = `<span style="color:var(--accent)">FOUND PERFECT SEED: ${testSeed}</span><br>Escaped in ${escapeDuration.toFixed(2)}s!`;
                     this.resetSimulation(testSeed);
+                    this.isPlaying = true;
+                    document.getElementById('hudPlayPauseBtn').textContent = '⏸ Pause';
                     this.cancelSeedSearch();
                     return;
                 }
@@ -784,10 +937,6 @@ class SimulationApp {
         document.getElementById('searchProgressContainer').style.display = 'none';
         document.getElementById('btn-findSeed').style.display = 'block';
         document.getElementById('btn-cancelSearch').style.display = 'none';
-        
-        const recordBtn = document.getElementById('btn-record');
-        recordBtn.textContent = 'Record Next Run';
-        recordBtn.classList.remove('btn-primary');
     }
 
     // --- Canvas MediaRecorder Video Exporter ---
@@ -857,11 +1006,22 @@ class SimulationApp {
 
             // Reset button states
             const recordBtn = document.getElementById('btn-record');
-            recordBtn.textContent = 'Record Next Run';
-            recordBtn.classList.remove('btn-primary');
+            recordBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
+                Record Current Seed
+            `;
+            recordBtn.classList.remove('active');
         };
 
         this.mediaRecorder.start();
+
+        // Update button UI to indicate active recording
+        const recordBtn = document.getElementById('btn-record');
+        recordBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+            Stop & Download Video
+        `;
+        recordBtn.classList.add('active');
     }
 
     stopRecording() {
@@ -919,63 +1079,10 @@ class SimulationApp {
         this.ctx.fillStyle = '#06080e';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Draw central grid guidelines
-        this.ctx.strokeStyle = 'rgba(255,255,255,0.02)';
-        this.ctx.lineWidth = 1;
-        
-        // Draw concentric guide circles
-        for (let r = 50; r < 500; r += 50) {
-            this.ctx.beginPath();
-            this.ctx.arc(this.physics.centerX, this.physics.centerY, r, 0, Math.PI * 2);
-            this.ctx.stroke();
-        }
+        // Delegate drawing of workspace geometry to the active workspace!
+        this.physics.render(this.ctx, { showNeon: this.showNeon });
 
-        // --- Draw Ball Neon Trail ---
-        const ball = this.physics.ball;
-        if (ball && ball.trail.length > 1) {
-            for (let i = 1; i < ball.trail.length; i++) {
-                const p1 = ball.trail[i - 1];
-                const p2 = ball.trail[i];
-                const pct = i / ball.trail.length;
-                
-                this.ctx.beginPath();
-                this.ctx.moveTo(p1.x, p1.y);
-                this.ctx.lineTo(p2.x, p2.y);
-                
-                // Neon green gradient trail
-                this.ctx.strokeStyle = `rgba(0, 255, 204, ${pct * 0.4})`;
-                this.ctx.lineWidth = ball.radius * 2 * pct;
-                this.ctx.lineCap = 'round';
-                this.ctx.stroke();
-            }
-        }
-
-        // --- Draw Rings ---
-        this.physics.rings.forEach(ring => {
-            const gap = ring.getGapAngles();
-            
-            this.ctx.save();
-            this.ctx.shadowBlur = this.showNeon ? 18 : 0;
-            this.ctx.shadowColor = ring.color;
-            this.ctx.strokeStyle = ring.color;
-            this.ctx.lineWidth = ring.thickness;
-            this.ctx.lineCap = 'round';
-            
-            // Draw ring leaving a gap
-            this.ctx.beginPath();
-            // Make the arc start and end at the gap limits
-            this.ctx.arc(
-                this.physics.centerX, 
-                this.physics.centerY, 
-                ring.radius, 
-                gap.end, 
-                gap.start
-            );
-            this.ctx.stroke();
-            this.ctx.restore();
-        });
-
-        // --- Draw sparks ---
+        // Draw sparks
         if (this.showParticles) {
             this.sparks.forEach(spark => {
                 this.ctx.beginPath();
@@ -987,23 +1094,33 @@ class SimulationApp {
             });
         }
 
-        // --- Draw Ball ---
-        if (ball) {
-            this.ctx.save();
-            this.ctx.shadowBlur = this.showNeon ? 25 : 0;
-            this.ctx.shadowColor = '#00ffcc';
-            
-            // Glowing central ball
-            this.ctx.beginPath();
-            this.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-            this.ctx.fillStyle = '#ffffff';
-            this.ctx.fill();
+        // Render visual overlay helper if paused
+        if (!this.isPlaying) {
+            this.ctx.fillStyle = 'rgba(6, 8, 14, 0.45)';
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-            // Subtle cyan outline
-            this.ctx.strokeStyle = '#00ffcc';
-            this.ctx.lineWidth = 2;
+            // Draw clean subtle blur card in center
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+            this.ctx.lineWidth = 1;
+            const cardWidth = 340;
+            const cardHeight = 110;
+            const cardX = this.canvas.width / 2 - cardWidth / 2;
+            const cardY = this.canvas.height / 2 - cardHeight / 2;
+            
+            this.ctx.beginPath();
+            this.ctx.roundRect(cardX, cardY, cardWidth, cardHeight, 16);
+            this.ctx.fill();
             this.ctx.stroke();
-            this.ctx.restore();
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = "bold 26px 'Space Grotesk', sans-serif";
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText("PAUSED", this.canvas.width / 2, this.canvas.height / 2 - 12);
+
+            this.ctx.fillStyle = '#00ffcc';
+            this.ctx.font = "600 13px 'Plus Jakarta Sans', sans-serif";
+            this.ctx.fillText("Press SPACE or click PLAY to run", this.canvas.width / 2, this.canvas.height / 2 + 22);
         }
 
         this.ctx.restore();

@@ -40,7 +40,8 @@
                     </div>
                     <div class="hud-pill">
                         <button id="hudPlayPauseBtn">⏸ Pause</button>
-                        <button id="hudRestartBtn">🔄 Reset</button>
+                        <button id="hudRestartBtn">🔄 Restart</button>
+                        <button id="hudNewSeedBtn">🎲 Random</button>
                     </div>
                 </div>
                 <canvas id="physicsCanvas" width="1080" height="1080"></canvas>
@@ -63,6 +64,18 @@
 
             <!-- Tab: Physics Settings -->
             <div class="tab-content active" id="tab-physics">
+                <div class="control-group">
+                    <div class="control-header">
+                        <span>Workspace Mode</span>
+                    </div>
+                    <select class="select-dropdown" id="select-workspace-mode">
+                        <option value="concentric-rings">Concentric Rings (Classic)</option>
+                        <option value="pachinko-pegs" disabled>Pachinko Peg Board (Coming Soon)</option>
+                        <option value="rectangular-maze" disabled>Rectangular Maze (Coming Soon)</option>
+                    </select>
+                    <span class="control-info">Choose the physical engine geometry structure.</span>
+                </div>
+
                 <div class="control-group">
                     <div class="control-header">
                         <span>Ball Speed</span>
@@ -190,9 +203,20 @@
                 <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.85rem;">
                     <button class="btn btn-danger" id="btn-record">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
-                        Record Next Run
+                        Record Current Seed
                     </button>
-                    <span class="control-info" style="text-align: center;">Records the simulation from the next restart until the ball escapes. Includes synthesizer sound.</span>
+                    <span class="control-info" style="text-align: center;">Restarts this seed with current settings and records until escape (or stop is clicked). Includes sound.</span>
+                </div>
+            </div>
+
+            <!-- Help / Shortcuts Footer -->
+            <div style="margin-top: auto; padding: 1rem 1.5rem; border-top: 1px solid var(--panel-border); font-size: 0.75rem; color: var(--text-secondary); background: rgba(8, 12, 20, 0.4);">
+                <div style="font-weight: 600; margin-bottom: 6px; color: var(--accent);">⌨ Keyboard Shortcuts</div>
+                <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 10px;">
+                    <span style="color: var(--text-primary); font-family: monospace; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 4px;">Space</span> Play / Pause
+                    <span style="color: var(--text-primary); font-family: monospace; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 4px;">R</span> Restart Simulation
+                    <span style="color: var(--text-primary); font-family: monospace; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 4px;">S</span> Toggle Finder Search
+                    <span style="color: var(--text-primary); font-family: monospace; background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 4px;">↑ / ↓</span> Adjust Ball Speed
                 </div>
             </div>
         </div>
